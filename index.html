@@ -1,160 +1,129 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Guess the English Word</title>
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    max-width: 600px;
-    margin: 50px auto;
-    padding: 20px;
-    text-align: center;
-    background: #f5f5f5;
-  }
-  input {
-    font-size: 20px;
-    padding: 10px;
-    width: 80%;
-    margin-bottom: 15px;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-  }
-  button {
-    padding: 10px 20px;
-    font-size: 20px;
-    border-radius: 6px;
-    border: none;
-    background: #007bff;
-    color: white;
-    cursor: pointer;
-  }
-  button:disabled {
-    background: #aaa;
-    cursor: not-allowed;
-  }
-  p.definition {
-    font-size: 20px;
-    margin-bottom: 10px;
-    min-height: 80px;
-    color: #333;
-  }
-  p.hint {
-    font-size: 18px;
-    margin-bottom: 20px;
-    color: #555;
-  }
-  p.message {
-    font-size: 20px;
-    min-height: 30px;
-  }
-</style>
-</head>
-<body>
-  <h1>Guess the English Word</h1>
-  <label for="dictSelect">Dictionary:</label>
-  <select id="dictSelect" style="font-size:16px;padding:6px;margin-bottom:12px;">
-    <option value="dictionary.json">Full</option>
-    <option value="dictionary.simple.json" selected>Simple</option>
-  </select>
-  <p class="definition" id="definition"></p>
-  <p class="hint" id="hint"></p>
-  <input type="text" id="guessInput" placeholder="Type your guess here" autocomplete="off" />
-  <br />
-  <button onclick="checkGuess()">Check Answer</button>
-  <p class="message" id="message"></p>
-  <button onclick="nextWord()" id="nextBtn" disabled>Next Word</button>
+<script>
+  let words = [];
+  let currentIndex = 0;
+  let timer = 60;
+  let countdown;
 
-  <script>
-    let words = [];
-    let currentIndex = 0;
+  const definitionEl = document.getElementById("definition");
+  const hintEl = document.getElementById("hint");
+  const guessInput = document.getElementById("guessInput");
+  const messageEl = document.getElementById("message");
+  const nextBtn = document.getElementById("nextBtn");
+  const dictSelect = document.getElementById("dictSelect");
 
-    const definitionEl = document.getElementById("definition");
-    const hintEl = document.getElementById("hint");
-    const guessInput = document.getElementById("guessInput");
-    const messageEl = document.getElementById("message");
-    const nextBtn = document.getElementById("nextBtn");
-    const dictSelect = document.getElementById("dictSelect");
+  // 🕒 Create timer element
+  const timerEl = document.createElement("p");
+  timerEl.style.fontSize = "22px";
+  timerEl.style.fontWeight = "bold";
+  timerEl.style.color = "#d6336c";
+  timerEl.id = "timer";
+  hintEl.insertAdjacentElement("afterend", timerEl);
 
-    function loadDictionaryAndStart() {
-      const dictFile = dictSelect.value;
-      fetch(dictFile)
-        .then(response => {
-          if (!response.ok) throw new Error("Failed to load dictionary");
-          return response.json();
-        })
-        .then(data => {
-          words = Object.entries(data).map(([word, definition]) => ({ word, definition }));
-          // Shuffle to randomize order
-          words.sort(() => Math.random() - 0.5);
-          currentIndex = 0;
-          showDefinition();
-        })
-        .catch(error => {
-          definitionEl.textContent = "⚠️ Could not load dictionary file.";
-          console.error(error);
-        });
-    }
-
-    dictSelect.addEventListener('change', () => {
-      // Reload dictionary and restart game
-      loadDictionaryAndStart();
-    });
-
-    function showDefinition() {
-      if (!words || words.length === 0) {
-        definitionEl.textContent = "No words available in the selected dictionary.";
-        hintEl.textContent = "";
-        guessInput.style.display = 'none';
-        nextBtn.style.display = 'none';
-        return;
-      }
-      const currentWord = words[currentIndex];
-      definitionEl.textContent = currentWord.definition;
-      hintEl.textContent = `Hint: The word has ${currentWord.word.length} letters.`;
-      guessInput.value = "";
-      guessInput.disabled = false;
-      messageEl.textContent = "";
-      nextBtn.disabled = true;
-      guessInput.style.display = '';
-      nextBtn.style.display = '';
-      guessInput.focus();
-    }
-
-    function checkGuess() {
-      const userGuess = guessInput.value.trim().toLowerCase();
-      if (userGuess === "") {
-        messageEl.textContent = "Please enter a guess.";
-        return;
-      }
-
-      if (userGuess === words[currentIndex].word.toLowerCase()) {
-        messageEl.style.color = "#28a745";
-        messageEl.textContent = "🎉 Correct!";
-        guessInput.disabled = true;
-        nextBtn.disabled = false;
-      } else {
-        messageEl.style.color = "#d6336c";
-        messageEl.textContent = "❌ Incorrect. Try again.";
-      }
-    }
-
-    function nextWord() {
-      currentIndex++;
-      if (currentIndex >= words.length) {
-        definitionEl.textContent = "You've completed all words! 🎊";
-        hintEl.textContent = "";
-        guessInput.style.display = "none";
-        nextBtn.style.display = "none";
-        messageEl.textContent = "";
-      } else {
+  function loadDictionaryAndStart() {
+    const dictFile = dictSelect.value;
+    fetch(dictFile)
+      .then(response => {
+        if (!response.ok) throw new Error("Failed to load dictionary");
+        return response.json();
+      })
+      .then(data => {
+        words = Object.entries(data).map(([word, definition]) => ({ word, definition }));
+        words.sort(() => Math.random() - 0.5);
+        currentIndex = 0;
         showDefinition();
-      }
+      })
+      .catch(error => {
+        definitionEl.textContent = "⚠️ Could not load dictionary file.";
+        console.error(error);
+      });
+  }
+
+  dictSelect.addEventListener('change', () => {
+    clearInterval(countdown);
+    loadDictionaryAndStart();
+  });
+
+  function showDefinition() {
+    clearInterval(countdown);
+    timer = 60;
+    updateTimer();
+
+    if (!words || words.length === 0) {
+      definitionEl.textContent = "No words available in the selected dictionary.";
+      hintEl.textContent = "";
+      guessInput.style.display = 'none';
+      nextBtn.style.display = 'none';
+      return;
     }
 
-    // initial load
-    loadDictionaryAndStart();
-  </script>
-</body>
-</html>
+    const currentWord = words[currentIndex];
+    definitionEl.textContent = currentWord.definition;
+    const firstLetter = currentWord.word.charAt(0).toUpperCase();
+    hintEl.textContent = `Hint: starts with "${firstLetter}" and has ${currentWord.word.length} letters.`;
+    guessInput.value = "";
+    guessInput.disabled = false;
+    messageEl.textContent = "";
+    nextBtn.disabled = true;
+    guessInput.style.display = '';
+    nextBtn.style.display = '';
+    guessInput.focus();
+
+    // ⏱️ start timer
+    countdown = setInterval(() => {
+      timer--;
+      updateTimer();
+      if (timer <= 0) {
+        clearInterval(countdown);
+        timeUp();
+      }
+    }, 1000);
+  }
+
+  function updateTimer() {
+    timerEl.textContent = `⏱ ${timer}s`;
+  }
+
+  function checkGuess() {
+    const userGuess = guessInput.value.trim().toLowerCase();
+    if (userGuess === "") {
+      messageEl.textContent = "Please enter a guess.";
+      return;
+    }
+
+    if (userGuess === words[currentIndex].word.toLowerCase()) {
+      clearInterval(countdown);
+      messageEl.style.color = "#28a745";
+      messageEl.textContent = "🎉 Correct!";
+      guessInput.disabled = true;
+      nextBtn.disabled = false;
+    } else {
+      messageEl.style.color = "#d6336c";
+      messageEl.textContent = "❌ Incorrect. Try again.";
+    }
+  }
+
+  function timeUp() {
+    messageEl.style.color = "#d6336c";
+    messageEl.textContent = `⏰ Time's up! The correct word was "${words[currentIndex].word}".`;
+    guessInput.disabled = true;
+    nextBtn.disabled = false;
+  }
+
+  function nextWord() {
+    clearInterval(countdown);
+    currentIndex++;
+    if (currentIndex >= words.length) {
+      definitionEl.textContent = "🎊 You've completed all words!";
+      hintEl.textContent = "";
+      timerEl.style.display = "none";
+      guessInput.style.display = "none";
+      nextBtn.style.display = "none";
+      messageEl.textContent = "";
+    } else {
+      showDefinition();
+    }
+  }
+
+  // initial load
+  loadDictionaryAndStart();
+</script>
