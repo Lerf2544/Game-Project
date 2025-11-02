@@ -29,6 +29,7 @@
     background: #007bff;
     color: white;
     cursor: pointer;
+    margin: 5px;
   }
   button:disabled {
     background: #aaa;
@@ -40,10 +41,30 @@
     min-height: 80px;
     color: #333;
   }
-  p.hint {
-    font-size: 18px;
-    margin-bottom: 20px;
-    color: #555;
+  /* Hint tiles */
+  #hintTiles {
+    margin: 10px 0 20px;
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+  }
+  .tile {
+    width: 36px;
+    height: 36px;
+    line-height: 36px;
+    border: 2px solid #999;
+    font-weight: bold;
+    font-size: 24px;
+    color: transparent;
+    background: white;
+    user-select: none;
+    border-radius: 6px;
+    transition: background-color 0.3s, color 0.3s;
+  }
+  .tile.revealed {
+    color: black;
+    border-color: #007bff;
+    background-color: #d0e7ff;
   }
   p.message {
     font-size: 20px;
@@ -64,132 +85,330 @@
     <option value="dictionary.simple.json" selected>Simple</option>
   </select>
   <p class="definition" id="definition"></p>
-  <p class="hint" id="hint"></p>
+  
+  <!-- Hint tiles container -->
+  <div id="hintTiles"></div>
+
   <p class="timer" id="timer">⏳ Time left: 60s</p>
   <input type="text" id="guessInput" placeholder="Type your guess here" autocomplete="off" />
   <br />
-  <button onclick="checkGuess()">Check Answer</button>
+  <button onclick="checkGuess()" id="checkBtn">Check Answer</button>
+  <button onclick="revealAnswer()" id="revealBtn">Reveal Answer</button>
   <p class="message" id="message"></p>
   <button onclick="nextWord()" id="nextBtn" disabled>Next Word</button>
 
-  <script>
-    let words = [];
-    let currentIndex = 0;
-    let timerInterval;
-    let timeLeft = 60;
+<script>
+let words = [];
+let currentIndex = 0;
+let timerInterval;
+let hintRevealInterval;
+let timeLeft = 60;
 
-    const definitionEl = document.getElementById("definition");
-    const hintEl = document.getElementById("hint");
-    const guessInput = document.getElementById("guessInput");
-    const messageEl = document.getElementById("message");
-    const nextBtn = document.getElementById("nextBtn");
-    const dictSelect = document.getElementById("dictSelect");
-    const timerEl = document.getElementById("timer");
+const definitionEl = document.getElementById("definition");
+const hintTilesEl = document.getElementById("hintTiles");
+const guessInput = document.getElementById("guessInput");
+const messageEl = document.getElementById("message");
+const nextBtn = document.getElementById("nextBtn");
+const dictSelect = document.getElementById("dictSelect");
+const timerEl = document.getElementById("timer");
+const checkBtn = document.getElementById("checkBtn");
+const revealBtn = document.getElementById("revealBtn");
 
-    function loadDictionaryAndStart() {
-      const dictFile = dictSelect.value;
-      fetch(dictFile)
-        .then(response => {
-          if (!response.ok) throw new Error("Failed to load dictionary");
-          return response.json();
-        })
-        .then(data => {
-          words = Object.entries(data).map(([word, definition]) => ({ word, definition }));
-          words.sort(() => Math.random() - 0.5);
-          currentIndex = 0;
-          showDefinition();
-        })
-        .catch(error => {
-          definitionEl.textContent = "⚠️ Could not load dictionary file.";
-          console.error(error);
-        });
+let revealedIndexes = [];
+
+function isInsideBalancedParentheses(text, index) {
+  let openParens = 0;
+  for (let i = 0; i < index; i++) {
+    if (text[i] === '(') openParens++;
+    else if (text[i] === ')') openParens = Math.max(openParens - 1, 0);
+  }
+  let closeParens = 0;
+  for (let i = index + 1; i < text.length; i++) {
+    if (text[i] === ')') {
+      closeParens++;
+      break;
+    } else if (text[i] === '(') {
+      return false;
     }
+  }
+  return openParens > 0 && closeParens > 0;
+}
 
-    dictSelect.addEventListener("change", loadDictionaryAndStart);
+function findValidFullStop(text, startIndex = 0) {
+  let index = text.indexOf('.', startIndex);
+  while (index !== -1) {
+    if (!isInsideBalancedParentheses(text, index) && text[index + 1] !== ')') {
+      return index;
+    }
+    index = text.indexOf('.', index + 1);
+  }
+  return -1;
+}
 
-    function showDefinition() {
-      clearInterval(timerInterval);
-      timeLeft = 60;
-      timerEl.textContent = `⏳ Time left: ${timeLeft}s`;
+function shortenDefinitions(definition) {
+  const paragraphs = definition.split(/\n\n+/);
 
-      if (!words || words.length === 0) {
-        definitionEl.textContent = "No words available in the selected dictionary.";
-        hintEl.textContent = "";
-        guessInput.style.display = "none";
-        nextBtn.style.display = "none";
-        timerEl.textContent = "";
-        return;
+  const processedParts = paragraphs.map(paragraph => {
+    if (/\d+\.\s/.test(paragraph)) {
+      let parts = paragraph.split(/(?=\d+\.\s)/g);
+
+      parts = parts.filter(part => {
+        const numberMatch = part.match(/^(\d+)\./);
+        if (!numberMatch) return false;
+        const num = numberMatch[1];
+        return num !== "0";
+      });
+
+      const filteredParts = [];
+      let lastNum = null;
+      for (const part of parts) {
+        const numberMatch = part.match(/^(\d+)\./);
+        if (!numberMatch) continue;
+        const num = numberMatch[1];
+        if (num === lastNum) continue;
+        lastNum = num;
+        filteredParts.push(part);
       }
 
-      const currentWord = words[currentIndex];
-      definitionEl.textContent = currentWord.definition;
-      hintEl.textContent = `Hint: The word has ${currentWord.word.length} letters.`;
-      guessInput.value = "";
-      guessInput.disabled = false;
-      messageEl.textContent = "";
-      nextBtn.disabled = true;
-      guessInput.style.display = "";
-      nextBtn.style.display = "";
-      guessInput.focus();
+      const usefulParts = filteredParts.filter(part => {
+        const textWithoutNumber = part.replace(/^\d+\.\s*/, '').trim();
+        return textWithoutNumber.length > 0 && /[a-zA-Z(),'"-]/.test(textWithoutNumber);
+      });
 
-      startTimer(currentWord);
-    }
-
-    function startTimer(currentWord) {
-      timerInterval = setInterval(() => {
-        timeLeft--;
-        timerEl.textContent = `⏳ Time left: ${timeLeft}s`;
-
-        if (timeLeft === 30) {
-          hintEl.textContent += " | Extra hint: starts with '" + currentWord.word[0] + "'.";
+      const shortenedParts = usefulParts.map(part => {
+        const firstSentenceEnd = findValidFullStop(part, part.indexOf(' ') + 1);
+        let text;
+        if (firstSentenceEnd === -1) {
+          text = part.trim();
+        } else {
+          text = part.slice(0, firstSentenceEnd + 1).trim();
         }
 
-        if (timeLeft <= 0) {
-          clearInterval(timerInterval);
-          guessInput.disabled = true;
-          messageEl.style.color = "#d6336c";
-          messageEl.textContent = `⏰ Time's up! The correct answer was "${currentWord.word}".`;
-          nextBtn.disabled = false;
+        const semicolonIndex = text.indexOf(';');
+        if (semicolonIndex !== -1) {
+          text = text.slice(0, semicolonIndex).trim() + '.';
         }
-      }, 1000);
+
+        return text;
+      });
+
+      return shortenedParts.join('<br>');
+    } else {
+      const firstSentenceEnd = findValidFullStop(paragraph);
+      if (firstSentenceEnd === -1) return paragraph.trim();
+      let text = paragraph.slice(0, firstSentenceEnd + 1).trim();
+      const semicolonIndex = text.indexOf(';');
+      if (semicolonIndex !== -1) {
+        text = text.slice(0, semicolonIndex).trim() + '.';
+      }
+      return text;
+    }
+  }).filter(p => p.length > 0);
+
+  return processedParts.join('<br>');
+}
+
+// ✅ Remove any sentence containing the answer word
+function removeAnswerSentences(definition, word) {
+  const lowerWord = word.toLowerCase();
+  const sentences = definition
+    .split(/(?<=[.?!])\s+/)
+    .filter(s => s.trim().length > 0);
+
+  const filtered = sentences.filter(s => {
+    const regex = new RegExp(`\\b${lowerWord}s?\\b`, "i");
+    return !regex.test(s);
+  });
+
+  // if removing leaves nothing, keep original
+  return filtered.length > 0 ? filtered.join(' ') : definition;
+}
+
+function loadDictionaryAndStart() {
+  clearIntervals();
+  const dictFile = dictSelect.value;
+  fetch(dictFile)
+    .then(response => {
+      if (!response.ok) throw new Error("Failed to load dictionary");
+      return response.json();
+    })
+    .then(data => {
+      words = Object.entries(data).map(([word, definition]) => ({ word, definition }));
+      words.sort(() => Math.random() - 0.5);
+      currentIndex = 0;
+      showDefinition();
+    })
+    .catch(error => {
+      definitionEl.textContent = "⚠️ Could not load dictionary file.";
+      console.error(error);
+    });
+}
+
+dictSelect.addEventListener("change", loadDictionaryAndStart);
+
+function showDefinition() {
+  clearIntervals();
+  timeLeft = 60;
+  timerEl.textContent = `⏳ Time left: ${timeLeft}s`;
+  revealedIndexes = [];
+
+  if (!words || words.length === 0) {
+    definitionEl.textContent = "No words available in the selected dictionary.";
+    hintTilesEl.innerHTML = "";
+    guessInput.style.display = "none";
+    nextBtn.style.display = "none";
+    timerEl.textContent = "";
+    return;
+  }
+
+  const currentWord = words[currentIndex];
+  let def = shortenDefinitions(currentWord.definition);
+  def = removeAnswerSentences(def, currentWord.word); // ✅ remove self-referencing sentences
+
+  definitionEl.innerHTML = def;
+
+  guessInput.value = "";
+  guessInput.disabled = false;
+  checkBtn.disabled = false;
+  revealBtn.disabled = false;
+  messageEl.textContent = "";
+  nextBtn.disabled = true;
+  guessInput.style.display = "";
+  nextBtn.style.display = "";
+
+  createHintTiles(currentWord.word);
+  guessInput.focus();
+
+  startTimer(currentWord);
+  startHintReveal(currentWord.word);
+}
+
+function createHintTiles(word) {
+  hintTilesEl.innerHTML = "";
+  for (let i = 0; i < word.length; i++) {
+    const tile = document.createElement("div");
+    tile.classList.add("tile");
+    tile.textContent = word[i].toUpperCase();
+    hintTilesEl.appendChild(tile);
+  }
+}
+
+function revealRandomLetter(word) {
+  const tiles = hintTilesEl.children;
+  const unrevealedIndexes = [];
+
+  for (let i = 0; i < tiles.length; i++) {
+    if (!tiles[i].classList.contains("revealed")) {
+      unrevealedIndexes.push(i);
+    }
+  }
+
+  if (unrevealedIndexes.length === 0) {
+    clearInterval(hintRevealInterval);
+    return;
+  }
+
+  const randomIndex = unrevealedIndexes[Math.floor(Math.random() * unrevealedIndexes.length)];
+  tiles[randomIndex].classList.add("revealed");
+  revealedIndexes.push(randomIndex);
+}
+
+function startTimer(currentWord) {
+  timerInterval = setInterval(() => {
+    timeLeft--;
+    timerEl.textContent = `⏳ Time left: ${timeLeft}s`;
+
+    if (timeLeft === 30) {
+      revealRandomLetter(currentWord.word);
     }
 
-    function checkGuess() {
-      const userGuess = guessInput.value.trim().toLowerCase();
-      if (userGuess === "") {
-        messageEl.textContent = "Please enter a guess.";
-        return;
-      }
-
-      const correctWord = words[currentIndex].word.toLowerCase();
-
-      if (userGuess === correctWord) {
-        clearInterval(timerInterval);
-        messageEl.style.color = "#28a745";
-        messageEl.textContent = "🎉 Correct!";
-        guessInput.disabled = true;
-        nextBtn.disabled = false;
-      } else {
-        messageEl.style.color = "#d6336c";
-        messageEl.textContent = "❌ Incorrect. Try again.";
-      }
+    if (timeLeft <= 0) {
+      clearIntervals();
+      guessInput.disabled = true;
+      checkBtn.disabled = true;
+      revealBtn.disabled = true;
+      messageEl.style.color = "#d6336c";
+      messageEl.textContent = `⏰ Time's up! The correct answer was "${currentWord.word}".`;
+      nextBtn.disabled = false;
     }
+  }, 1000);
+}
 
-    function nextWord() {
-      currentIndex++;
-      if (currentIndex >= words.length) {
-        definitionEl.textContent = "You've completed all words! 🎊";
-        hintEl.textContent = "";
-        guessInput.style.display = "none";
-        nextBtn.style.display = "none";
-        timerEl.textContent = "";
-        messageEl.textContent = "";
-      } else {
-        showDefinition();
-      }
-    }
+function startHintReveal(word) {
+  hintRevealInterval = setInterval(() => {
+    revealRandomLetter(word);
+  }, 10000);
+}
 
-    loadDictionaryAndStart();
-  </script>
+function clearIntervals() {
+  clearInterval(timerInterval);
+  clearInterval(hintRevealInterval);
+}
+
+function checkGuess() {
+  const userGuess = guessInput.value.trim().toLowerCase();
+  if (userGuess === "") {
+    messageEl.textContent = "Please enter a guess.";
+    return;
+  }
+
+  const correctWord = words[currentIndex].word.toLowerCase();
+
+  if (userGuess === correctWord) {
+    clearIntervals();
+    messageEl.style.color = "#28a745";
+    messageEl.textContent = "🎉 Correct!";
+    guessInput.disabled = true;
+    checkBtn.disabled = true;
+    revealBtn.disabled = true;
+    nextBtn.disabled = false;
+  } else {
+    messageEl.style.color = "#d6336c";
+    messageEl.textContent = "❌ Incorrect. Try again.";
+  }
+}
+
+function revealAnswer() {
+  clearIntervals();
+  const currentWord = words[currentIndex].word;
+  const tiles = hintTilesEl.children;
+  for (let tile of tiles) tile.classList.add("revealed");
+
+  messageEl.style.color = "#d6336c";
+  messageEl.textContent = `🔓 The answer is "${currentWord}".`;
+  guessInput.disabled = true;
+  checkBtn.disabled = true;
+  revealBtn.disabled = true;
+  nextBtn.disabled = false;
+}
+
+function nextWord() {
+  currentIndex++;
+  if (currentIndex >= words.length) {
+    definitionEl.textContent = "You've completed all words! 🎊";
+    hintTilesEl.innerHTML = "";
+    guessInput.style.display = "none";
+    nextBtn.style.display = "none";
+    timerEl.textContent = "";
+    messageEl.textContent = "";
+    checkBtn.style.display = "none";
+    revealBtn.style.display = "none";
+  } else {
+    showDefinition();
+  }
+}
+
+// ✅ Enter key triggers check or next
+guessInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (!checkBtn.disabled) checkGuess();
+    else if (!nextBtn.disabled) nextWord();
+  }
+});
+
+loadDictionaryAndStart();
+</script>
+
 </body>
 </html>
