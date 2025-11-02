@@ -53,6 +53,11 @@
 </head>
 <body>
   <h1>Guess the English Word</h1>
+  <label for="dictSelect">Dictionary:</label>
+  <select id="dictSelect" style="font-size:16px;padding:6px;margin-bottom:12px;">
+    <option value="dictionary.json">Full</option>
+    <option value="dictionary.simple.json" selected>Simple</option>
+  </select>
   <p class="definition" id="definition"></p>
   <p class="hint" id="hint"></p>
   <input type="text" id="guessInput" placeholder="Type your guess here" autocomplete="off" />
@@ -70,26 +75,41 @@
     const guessInput = document.getElementById("guessInput");
     const messageEl = document.getElementById("message");
     const nextBtn = document.getElementById("nextBtn");
+    const dictSelect = document.getElementById("dictSelect");
 
-    // ✅ Load dictionary.json dynamically
-    fetch('dictionary.json')
-      .then(response => {
-        if (!response.ok) throw new Error("Failed to load dictionary");
-        return response.json();
-      })
-      .then(data => {
-        // Convert object to array format
-        words = Object.entries(data).map(([word, definition]) => ({ word, definition }));
-        // Shuffle to randomize order
-        words.sort(() => Math.random() - 0.5);
-        showDefinition();
-      })
-      .catch(error => {
-        definitionEl.textContent = "⚠️ Could not load dictionary file.";
-        console.error(error);
-      });
+    function loadDictionaryAndStart() {
+      const dictFile = dictSelect.value;
+      fetch(dictFile)
+        .then(response => {
+          if (!response.ok) throw new Error("Failed to load dictionary");
+          return response.json();
+        })
+        .then(data => {
+          words = Object.entries(data).map(([word, definition]) => ({ word, definition }));
+          // Shuffle to randomize order
+          words.sort(() => Math.random() - 0.5);
+          currentIndex = 0;
+          showDefinition();
+        })
+        .catch(error => {
+          definitionEl.textContent = "⚠️ Could not load dictionary file.";
+          console.error(error);
+        });
+    }
+
+    dictSelect.addEventListener('change', () => {
+      // Reload dictionary and restart game
+      loadDictionaryAndStart();
+    });
 
     function showDefinition() {
+      if (!words || words.length === 0) {
+        definitionEl.textContent = "No words available in the selected dictionary.";
+        hintEl.textContent = "";
+        guessInput.style.display = 'none';
+        nextBtn.style.display = 'none';
+        return;
+      }
       const currentWord = words[currentIndex];
       definitionEl.textContent = currentWord.definition;
       hintEl.textContent = `Hint: The word has ${currentWord.word.length} letters.`;
@@ -97,6 +117,8 @@
       guessInput.disabled = false;
       messageEl.textContent = "";
       nextBtn.disabled = true;
+      guessInput.style.display = '';
+      nextBtn.style.display = '';
       guessInput.focus();
     }
 
@@ -130,6 +152,9 @@
         showDefinition();
       }
     }
+
+    // initial load
+    loadDictionaryAndStart();
   </script>
 </body>
 </html>
